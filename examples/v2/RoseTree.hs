@@ -102,22 +102,20 @@ treeTable = Table "rosetree" $ pTree TreeP
 
 newTree :: Int -> Transaction (Maybe Int)
 newTree rootId =
-    insertReturningFirst treeTable treeId (TreeP Nothing (pgInt4 rootId))
+    insertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
 
 
 newBranch :: Transaction (Maybe Int)
-newBranch = insertReturningFirst branchTable branchId (BranchP Nothing)
+newBranch = insertReturningFirst branchTable (BranchP Nothing) branchId
 
 
 insertNode :: Int -> Maybe Int -> Int -> Transaction (Maybe Int)
 insertNode bid (Just nbid) x = do
-    Just nodeId <- insertReturningFirst nodeTable nodeId
-        (NodeP Nothing (pgInt4 bid) (pgInt4 x))
+    Just nodeId <- insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
     insert nodeBranchTable (NodeBranchP (pgInt4 nodeId) (pgInt4 nbid))
     return (Just nodeId)
 insertNode bid Nothing x =
-    insertReturningFirst nodeTable nodeId
-        (NodeP Nothing (pgInt4 bid) (pgInt4 x))
+    insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
 
 
 insertTree :: MonadIO m => Rose Int -> OpaleyeT m Int
@@ -197,9 +195,9 @@ selectBranch bid = do
   where
     nodeByBranchId :: Query (ReadNode PGInt4, NullableNodeBranch)
     nodeByBranchId = byId nodeAndBranch (nodeBranchId . fst) bid
-    
-    mkNode 
-        :: (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int)) 
+
+    mkNode
+        :: (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int))
         -> Transaction (Rose Int)
     mkNode (NodeP _ _ x, NodeBranchP Nothing Nothing) = return (Leaf x)
     mkNode (NodeP _ _ x, NodeBranchP _ (Just nbid)) = do

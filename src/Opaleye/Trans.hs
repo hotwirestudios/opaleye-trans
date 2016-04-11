@@ -64,51 +64,50 @@ withConn :: MonadIO m => (Connection -> IO a) -> OpaleyeT m a
 withConn f = liftIO . f =<< ask
 
 -- | Execute a 'Query'. See 'runQuery'.
-query :: Default QueryRunner a b => Query a -> Transaction [b]
+query :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction [haskells]
 query q = withConnIO (`runQuery` q)
 
 -- | Retrieve the first result from a 'Query'. Similar to @listToMaybe <$> runQuery@.
-queryFirst :: Default QueryRunner a b => Query a -> Transaction (Maybe b)
+queryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction (Maybe haskells)
 queryFirst q = listToMaybe <$> query q
 
 -- | Insert into a 'Table'. See 'runInsert'.
-insert :: Table w r -> w -> Transaction Int64
-insert t w = withConnIO (\c -> runInsert c t w)
+insert :: Table writerColumns readerColumns -> writerColumns -> Transaction Int64
+insert table columns = withConnIO (\c -> runInsert c table columns)
 
 -- | Insert many records into a 'Table'. See 'runInsertMany'.
-insertMany :: Table w r -> [w] -> Transaction Int64
-insertMany t ws = withConnIO (\c -> runInsertMany c t ws)
+insertMany :: Table writerColumns readerColumns -> [writerColumns] -> Transaction Int64
+insertMany table columns = withConnIO (\c -> runInsertMany c table columns)
 
 -- | Insert a record into a 'Table' with a return value. See 'runInsertReturning'.
 insertReturning
-    :: Default QueryRunner a b
-    => Table w r
-    -> (r -> a)
-    -> w
-    -> Transaction [b]
-insertReturning t ret w = withConnIO (\c -> runInsertReturning c t w ret)
+    :: Default QueryRunner returned haskells
+    => Table writerColumns readerColumns
+    -> writerColumns
+    -> (readerColumns -> returned)
+    -> Transaction [haskells]
+insertReturning table columns ret = withConnIO (\c -> runInsertReturning c table columns ret)
 
 -- | Insert a record into a 'Table' with a return value. Retrieve only the first result.
 -- Similar to @listToMaybe <$> insertReturning@
 insertReturningFirst
-    :: Default QueryRunner a b
-    => Table w r
-    -> (r -> a)
-    -> w
-    -> Transaction (Maybe b)
-insertReturningFirst t ret w = listToMaybe <$> insertReturning t ret w
+    :: Default QueryRunner returned haskells
+    => Table writerColumns readerColumns
+    -> writerColumns
+    -> (readerColumns -> returned)
+    -> Transaction (Maybe haskells)
+insertReturningFirst table columns ret = listToMaybe <$> insertReturning table columns ret
 
 -- | Insert many records into a 'Table' with a return value for each record.
 --
 -- Maybe not worth defining. This almost certainly does the wrong thing.
 insertManyReturning
-    :: (MonadIO m, Default QueryRunner a b)
-    => Table w r
-    -> (r -> a)
-    -> [w]
-    -> OpaleyeT m [[b]]
-insertManyReturning t ret ws =
-    transaction (mapM (insertReturning t ret) ws)
+    :: (MonadIO m, Default QueryRunner returned haskells)
+    => Table writerColumns readerColumns
+    -> [writerColumns]
+    -> (readerColumns -> returned)
+    -> OpaleyeT m [[haskells]]
+insertManyReturning table columns ret = transaction $ traverse (\col -> insertReturning table col ret) columns
 
 -- | With a 'Connection' in a 'Transaction'
 -- This isn't exposed so that users can't just drop down to IO

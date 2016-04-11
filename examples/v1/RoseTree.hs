@@ -83,17 +83,16 @@ treeTable = Table "rosetree" $ pTree TreeP
 
 
 newTree :: Int -> Transaction (Maybe Int)
-newTree rootId = insertReturningFirst treeTable treeId (TreeP Nothing (pgInt4 rootId))
+newTree rootId = insertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
 
 
 newBranch :: Transaction (Maybe Int)
-newBranch = insertReturningFirst branchTable branchId (BranchP Nothing)
+newBranch = insertReturningFirst branchTable (BranchP Nothing) branchId
 
 
 insertNode :: Int -> Int -> Int -> Transaction (Maybe Int)
 insertNode bid nbid x =
-    insertReturningFirst nodeTable nodeId
-        (NodeP Nothing (pgInt4 bid) (pgInt4 nbid) (pgInt4 x))
+    insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 nbid) (pgInt4 x)) nodeId
 
 
 insertTree :: MonadIO m => Rose Int -> OpaleyeT m Int
