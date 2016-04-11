@@ -8,6 +8,7 @@
 module Main where
 
 import           Control.Arrow
+import           Control.Monad.IO.Class     (MonadIO)
 
 import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 
