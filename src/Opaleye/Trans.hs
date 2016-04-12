@@ -13,28 +13,28 @@ module Opaleye.Trans
     , ReadOnly
     , ReadWrite
     , toReadWrite
-    , transaction
-    , transactionReadOnly
+    , runTransaction
+    , runReadOnlyTransaction
 
     , -- * Queries
-      query
-    , queryFirst
+      runQuery
+    , runQueryFirst
 
     , -- * Inserts
-      insert
-    , insertMany
-    , insertReturning
-    , insertReturningFirst
-    , insertReturningFirst'
-    , insertManyReturning
+      runInsert
+    , runInsertMany
+    , runInsertReturning
+    , runInsertReturningFirst
+    , runInsertReturningFirst'
+    , runInsertManyReturning
 
     , -- * Deletes
-      delete
+      runDelete
 
-    , unsafeQuery
+    , unsafeRunQuery
 
     , -- * Opaleye
-      module O
+      module Export
     ) where
 
 import           Control.Monad.Base                     (MonadBase, liftBase)
@@ -47,24 +47,23 @@ import           Data.Maybe                             (listToMaybe)
 import           Data.Profunctor.Product.Default        (Default)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
-import           Opaleye.Aggregate                      as O
-import           Opaleye.Binary                         as O
-import           Opaleye.Column                         as O
-import           Opaleye.Constant                       as O
-import           Opaleye.Distinct                       as O
-import           Opaleye.Join                           as O
-import           Opaleye.Label                          as O
-import           Opaleye.Manipulation                   (runDelete,
-                                                         runInsertMany,
-                                                         runInsertManyReturning)
-import           Opaleye.Operators                      as O
-import           Opaleye.Order                          as O
-import           Opaleye.PGTypes                        as O
-import           Opaleye.QueryArr                       as O
-import           Opaleye.RunQuery                       (QueryRunner, runQuery)
-import           Opaleye.Sql                            as O
-import           Opaleye.Table                          as O
-import           Opaleye.Values                         as O
+import           Opaleye.Aggregate                      as Export
+import           Opaleye.Binary                         as Export
+import           Opaleye.Column                         as Export
+import           Opaleye.Constant                       as Export
+import           Opaleye.Distinct                       as Export
+import           Opaleye.Join                           as Export
+import           Opaleye.Label                          as Export
+import qualified Opaleye.Manipulation                   as OE
+import           Opaleye.Operators                      as Export
+import           Opaleye.Order                          as Export
+import           Opaleye.PGTypes                        as Export
+import           Opaleye.QueryArr                       as Export
+import           Opaleye.RunQuery                       (QueryRunner)
+import qualified Opaleye.RunQuery                       as OE
+import           Opaleye.Sql                            as Export
+import           Opaleye.Table                          as Export
+import           Opaleye.Values                         as Export
 
 -- | The 'Opaleye' monad transformer
 newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT PSQL.Connection m a }
@@ -88,12 +87,12 @@ toReadWrite :: Transaction readWriteMode a -> Transaction ReadWrite a
 toReadWrite (Transaction t) = Transaction t
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
-transaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
-transaction t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadWrite t
+runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
+runTransaction t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadWrite t
 
 -- | Run a postgresql read-only transaction in the 'OpaleyeT' monad
-transactionReadOnly :: MonadIO m => Transaction ReadOnly a -> OpaleyeT m a
-transactionReadOnly t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadOnly t
+runReadOnlyTransaction :: MonadIO m => Transaction ReadOnly a -> OpaleyeT m a
+runReadOnlyTransaction t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadOnly t
 
 unsafeRunTransaction :: PSQL.Connection -> PSQL.ReadWriteMode -> Transaction readWriteMode a -> IO a
 unsafeRunTransaction conn readWriteMode (Transaction t) =
@@ -103,65 +102,65 @@ unsafeWithConnection :: MonadIO m => (PSQL.Connection -> IO a) -> OpaleyeT m a
 unsafeWithConnection f = liftIO . f =<< ask
 
 -- | Execute a 'Query'. See 'runQuery'.
-query :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly [haskells]
-query q = unsafeWithConnectionIO (`runQuery` q)
+runQuery :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly [haskells]
+runQuery q = unsafeWithConnectionIO (`OE.runQuery` q)
 
 -- | Retrieve the first result from a 'Query'. Similar to @listToMaybe <$> runQuery@.
-queryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly (Maybe haskells)
-queryFirst q = listToMaybe <$> query q
+runQueryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly (Maybe haskells)
+runQueryFirst q = listToMaybe <$> runQuery q
 
 -- | Insert into a 'Table'. See 'runInsert'.
-insert :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
-insert table columns = unsafeWithConnectionIO (\c -> runInsertMany c table [columns])
+runInsert :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
+runInsert table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table [columns])
 
 -- | Insert many records into a 'Table'. See 'runInsertMany'.
-insertMany :: Table writerColumns readerColumns -> [writerColumns] -> Transaction ReadWrite Int64
-insertMany table columns = unsafeWithConnectionIO (\c -> runInsertMany c table columns)
+runInsertMany :: Table writerColumns readerColumns -> [writerColumns] -> Transaction ReadWrite Int64
+runInsertMany table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table columns)
 
 -- | Insert a record into a 'Table' with a return value. See 'runInsertReturning'.
-insertReturning
+runInsertReturning
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> writerColumns
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-insertReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertManyReturning c table [columns] ret)
+runInsertReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table [columns] ret)
 
 -- | Insert a record into a 'Table' with a return value. Retrieve only the first result.
 -- Similar to @listToMaybe <$> insertReturning@
-insertReturningFirst
+runInsertReturningFirst
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> writerColumns
     -> (readerColumns -> returned)
     -> Transaction ReadWrite (Maybe haskells)
-insertReturningFirst table columns ret = listToMaybe <$> insertReturning table columns ret
+runInsertReturningFirst table columns ret = listToMaybe <$> runInsertReturning table columns ret
 
-insertReturningFirst'
+runInsertReturningFirst'
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> writerColumns
     -> (readerColumns -> returned)
     -> Transaction ReadWrite haskells
-insertReturningFirst' table columns ret = head' <$> insertReturning table columns ret
+runInsertReturningFirst' table columns ret = head' <$> runInsertReturning table columns ret
     where
         head' [] = error "Return value expected in insertReturningFirst'"
         head' (x:_) = x
 
 -- | Insert many records into a 'Table' with a return value for each record.
-insertManyReturning
+runInsertManyReturning
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> [writerColumns]
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-insertManyReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertManyReturning c table columns ret)
+runInsertManyReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table columns ret)
 
-delete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
-delete table predicate = unsafeWithConnectionIO (\c -> runDelete c table predicate)
+runDelete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
+runDelete table predicate = unsafeWithConnectionIO (\c -> OE.runDelete c table predicate)
 
-unsafeQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
-unsafeQuery = unsafeWithConnectionIO
+unsafeRunQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
+unsafeRunQuery = unsafeWithConnectionIO
 
 -- | With a 'Connection' in a 'Transaction'
 -- This isn't exposed so that users can't just drop down to IO

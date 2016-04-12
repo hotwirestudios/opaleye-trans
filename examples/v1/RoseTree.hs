@@ -14,7 +14,6 @@ import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 
 import qualified Database.PostgreSQL.Simple as PSQL
 
-import           Opaleye
 import           Opaleye.Trans
 
 
@@ -83,20 +82,20 @@ treeTable = Table "rosetree" $ pTree TreeP
 
 
 newTree :: Int -> Transaction ReadWrite (Maybe Int)
-newTree rootId = insertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
+newTree rootId = runInsertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
 
 
 newBranch :: Transaction ReadWrite (Maybe Int)
-newBranch = insertReturningFirst branchTable (BranchP Nothing) branchId
+newBranch = runInsertReturningFirst branchTable (BranchP Nothing) branchId
 
 
 insertNode :: Int -> Int -> Int -> Transaction ReadWrite (Maybe Int)
 insertNode bid nbid x =
-    insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 nbid) (pgInt4 x)) nodeId
+    runInsertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 nbid) (pgInt4 x)) nodeId
 
 
 insertTree :: MonadIO m => Rose Int -> OpaleyeT m Int
-insertTree (Node x xs) = transaction $ do
+insertTree (Node x xs) = runTransaction $ do
     Just bid <- newBranch
     Just rootId <- insertNode 0 bid x
     Just treeId <- newTree rootId
@@ -122,7 +121,7 @@ selectTree treeId = do
 
 
 selectRootNode :: Int -> Transaction ReadOnly (Maybe Int)
-selectRootNode tid = queryFirst rootNode
+selectRootNode tid = runQueryFirst rootNode
   where
     rootNode :: Query (Column PGInt4)
     rootNode = proc () -> do
@@ -132,7 +131,7 @@ selectRootNode tid = queryFirst rootNode
 
 
 selectNode :: Int -> Transaction ReadOnly (Maybe (NodeP Int Int Int Int))
-selectNode nid = queryFirst nodeById
+selectNode nid = runQueryFirst nodeById
   where
     nodeById :: Query (ReadNode PGInt4)
     nodeById = proc () -> do
@@ -143,7 +142,7 @@ selectNode nid = queryFirst nodeById
 
 selectBranch :: Int -> Transaction ReadOnly [Rose Int]
 selectBranch bid = do
-    nodes <- query nodeByBranchId
+    nodes <- runQuery nodeByBranchId
     sequence (mkNode <$> nodes)
   where
     nodeByBranchId :: Query (ReadNode PGInt4)
@@ -175,7 +174,7 @@ main = do
                     [ Node 12 []
                     , Node 14 []]]
 
-    tree' <- runOpaleyeT conn $ transactionReadOnly . selectTree =<< insertTree tree
+    tree' <- runOpaleyeT conn $ runReadOnlyTransaction . selectTree =<< insertTree tree
 
     print (tree, tree')
     print (tree == tree')

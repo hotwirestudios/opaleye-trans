@@ -15,7 +15,6 @@ import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 
 import qualified Database.PostgreSQL.Simple as PSQL
 
-import           Opaleye
 import           Opaleye.Trans
 
 
@@ -102,24 +101,24 @@ treeTable = Table "rosetree" $ pTree TreeP
 
 newTree :: Int -> Transaction ReadWrite (Maybe Int)
 newTree rootId =
-    insertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
+    runInsertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
 
 
 newBranch :: Transaction ReadWrite (Maybe Int)
-newBranch = insertReturningFirst branchTable (BranchP Nothing) branchId
+newBranch = runInsertReturningFirst branchTable (BranchP Nothing) branchId
 
 
 insertNode :: Int -> Maybe Int -> Int -> Transaction ReadWrite (Maybe Int)
 insertNode bid (Just nbid) x = do
-    Just nodeId <- insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
-    insert nodeBranchTable (NodeBranchP (pgInt4 nodeId) (pgInt4 nbid))
+    Just nodeId <- runInsertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
+    runInsert nodeBranchTable (NodeBranchP (pgInt4 nodeId) (pgInt4 nbid))
     return (Just nodeId)
 insertNode bid Nothing x =
-    insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
+    runInsertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
 
 
 insertTree :: MonadIO m => Rose Int -> OpaleyeT m Int
-insertTree (Node x xs) = transaction $ do
+insertTree (Node x xs) = runTransaction $ do
     Just bid <- newBranch
     Just rootId <- insertNode 0 (Just bid) x
     Just treeId <- newTree rootId
@@ -127,7 +126,7 @@ insertTree (Node x xs) = transaction $ do
     mapM_ (insertTree' bid) xs
 
     return treeId
-insertTree (Leaf x) = transaction $ do
+insertTree (Leaf x) = runTransaction $ do
     Just rootId <- insertNode 0 Nothing x
     Just treeId <- newTree rootId
     return treeId
@@ -155,7 +154,7 @@ selectTree treeId = do
 
 
 selectRootNode :: Int -> Transaction ReadOnly (Maybe Int)
-selectRootNode tid = queryFirst rootNode
+selectRootNode tid = runQueryFirst rootNode
   where
     rootNode :: Query (Column PGInt4)
     rootNode = proc () -> do
@@ -182,7 +181,7 @@ byId q getId id' = proc () -> do
 
 
 selectNode :: Int -> Transaction ReadOnly (Maybe (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int)))
-selectNode nid = queryFirst nodeById
+selectNode nid = runQueryFirst nodeById
   where
     nodeById :: Query (ReadNode PGInt4, NullableNodeBranch)
     nodeById = byId nodeAndBranch (nodeId . fst) nid
@@ -190,7 +189,7 @@ selectNode nid = queryFirst nodeById
 
 selectBranch :: Int -> Transaction ReadOnly [Rose Int]
 selectBranch bid = do
-    nodes <- query nodeByBranchId
+    nodes <- runQuery nodeByBranchId
     sequence (mkNode <$> nodes)
   where
     nodeByBranchId :: Query (ReadNode PGInt4, NullableNodeBranch)
@@ -223,7 +222,7 @@ main = do
                     [ Leaf 12
                     , Leaf 14]]
 
-    tree' <- runOpaleyeT conn $ transactionReadOnly . selectTree =<< insertTree tree
+    tree' <- runOpaleyeT conn $ runReadOnlyTransaction . selectTree =<< insertTree tree
 
     print tree
     print tree'
