@@ -25,6 +25,7 @@ module Opaleye.Trans
     , insertMany
     , insertReturning
     , insertReturningFirst
+    , insertReturningFirst'
     , insertManyReturning
 
     , unsafeQuery
@@ -88,7 +89,7 @@ queryFirst q = listToMaybe <$> query q
 
 -- | Insert into a 'Table'. See 'runInsert'.
 insert :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
-insert table columns = unsafeWithConnectionIO (\c -> runInsert c table columns)
+insert table columns = unsafeWithConnectionIO (\c -> runInsertMany c table [columns])
 
 -- | Insert many records into a 'Table'. See 'runInsertMany'.
 insertMany :: Table writerColumns readerColumns -> [writerColumns] -> Transaction ReadWrite Int64
@@ -101,7 +102,7 @@ insertReturning
     -> writerColumns
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-insertReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertReturning c table columns ret)
+insertReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertManyReturning c table [columns] ret)
 
 -- | Insert a record into a 'Table' with a return value. Retrieve only the first result.
 -- Similar to @listToMaybe <$> insertReturning@
@@ -113,16 +114,25 @@ insertReturningFirst
     -> Transaction ReadWrite (Maybe haskells)
 insertReturningFirst table columns ret = listToMaybe <$> insertReturning table columns ret
 
+insertReturningFirst'
+    :: Default QueryRunner returned haskells
+    => Table writerColumns readerColumns
+    -> writerColumns
+    -> (readerColumns -> returned)
+    -> Transaction ReadWrite haskells
+insertReturningFirst' table columns ret = head' <$> insertReturning table columns ret
+    where
+        head' [] = error "Return value expected in insertReturningFirst'"
+        head' (x:_) = x
+
 -- | Insert many records into a 'Table' with a return value for each record.
---
--- Maybe not worth defining. This almost certainly does the wrong thing.
 insertManyReturning
-    :: (MonadIO m, Default QueryRunner returned haskells)
+    :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> [writerColumns]
     -> (readerColumns -> returned)
-    -> OpaleyeT m [[haskells]]
-insertManyReturning table columns ret = transaction $ traverse (\col -> insertReturning table col ret) columns
+    -> Transaction ReadWrite [haskells]
+insertManyReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertManyReturning c table columns ret)
 
 unsafeQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
 unsafeQuery = unsafeWithConnectionIO
