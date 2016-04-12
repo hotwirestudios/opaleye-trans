@@ -29,6 +29,9 @@ module Opaleye.Trans
     , insertManyReturning
 
     , unsafeQuery
+
+    , -- * Opaleye
+      module O
     ) where
 
 import           Control.Monad.Base                     (MonadBase, liftBase)
@@ -41,7 +44,23 @@ import           Data.Maybe                             (listToMaybe)
 import           Data.Profunctor.Product.Default        (Default)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
-import           Opaleye
+import           Opaleye.Aggregate                      as O
+import           Opaleye.Binary                         as O
+import           Opaleye.Column                         as O
+import           Opaleye.Constant                       as O
+import           Opaleye.Distinct                       as O
+import           Opaleye.Join                           as O
+import           Opaleye.Label                          as O
+import           Opaleye.Manipulation                   (runInsertMany,
+                                                         runInsertManyReturning)
+import           Opaleye.Operators                      as O
+import           Opaleye.Order                          as O
+import           Opaleye.PGTypes                        as O
+import           Opaleye.QueryArr                       as O
+import           Opaleye.RunQuery                       (QueryRunner, runQuery)
+import           Opaleye.Sql                            as O
+import           Opaleye.Table                          as O
+import           Opaleye.Values                         as O
 
 -- | The 'Opaleye' monad transformer
 newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT PSQL.Connection m a }
