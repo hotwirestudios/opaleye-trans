@@ -100,16 +100,16 @@ treeTable = Table "rosetree" $ pTree TreeP
     }
 
 
-newTree :: Int -> Transaction (Maybe Int)
+newTree :: Int -> Transaction ReadWrite (Maybe Int)
 newTree rootId =
     insertReturningFirst treeTable (TreeP Nothing (pgInt4 rootId)) treeId
 
 
-newBranch :: Transaction (Maybe Int)
+newBranch :: Transaction ReadWrite (Maybe Int)
 newBranch = insertReturningFirst branchTable (BranchP Nothing) branchId
 
 
-insertNode :: Int -> Maybe Int -> Int -> Transaction (Maybe Int)
+insertNode :: Int -> Maybe Int -> Int -> Transaction ReadWrite (Maybe Int)
 insertNode bid (Just nbid) x = do
     Just nodeId <- insertReturningFirst nodeTable (NodeP Nothing (pgInt4 bid) (pgInt4 x)) nodeId
     insert nodeBranchTable (NodeBranchP (pgInt4 nodeId) (pgInt4 nbid))
@@ -133,7 +133,7 @@ insertTree (Leaf x) = transaction $ do
     return treeId
 
 
-insertTree' :: Int -> Rose Int -> Transaction ()
+insertTree' :: Int -> Rose Int -> Transaction ReadWrite ()
 insertTree' bid (Node x xs) = do
     Just nbid <- newBranch
     insertNode bid (Just nbid) x
@@ -143,7 +143,7 @@ insertTree' bid (Leaf x) =
 
 
 -- TODO Wrong order
-selectTree :: Int -> Transaction (Rose Int)
+selectTree :: Int -> Transaction ReadOnly (Rose Int)
 selectTree treeId = do
     Just rootId <- selectRootNode treeId
     Just (NodeP _ _ x, NodeBranchP _ mbid) <- selectNode rootId
@@ -154,7 +154,7 @@ selectTree treeId = do
         Nothing -> return (Leaf x)
 
 
-selectRootNode :: Int -> Transaction (Maybe Int)
+selectRootNode :: Int -> Transaction ReadOnly (Maybe Int)
 selectRootNode tid = queryFirst rootNode
   where
     rootNode :: Query (Column PGInt4)
@@ -181,14 +181,14 @@ byId q getId id' = proc () -> do
     returnA -< row
 
 
-selectNode :: Int -> Transaction (Maybe (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int)))
+selectNode :: Int -> Transaction ReadOnly (Maybe (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int)))
 selectNode nid = queryFirst nodeById
   where
     nodeById :: Query (ReadNode PGInt4, NullableNodeBranch)
     nodeById = byId nodeAndBranch (nodeId . fst) nid
 
 
-selectBranch :: Int -> Transaction [Rose Int]
+selectBranch :: Int -> Transaction ReadOnly [Rose Int]
 selectBranch bid = do
     nodes <- query nodeByBranchId
     sequence (mkNode <$> nodes)
@@ -198,7 +198,7 @@ selectBranch bid = do
 
     mkNode
         :: (NodeP Int Int Int, NodeBranchP (Maybe Int) (Maybe Int))
-        -> Transaction (Rose Int)
+        -> Transaction ReadOnly (Rose Int)
     mkNode (NodeP _ _ x, NodeBranchP Nothing Nothing) = return (Leaf x)
     mkNode (NodeP _ _ x, NodeBranchP _ (Just nbid)) = do
         xs <- selectBranch nbid
@@ -223,7 +223,7 @@ main = do
                     [ Leaf 12
                     , Leaf 14]]
 
-    tree' <- runOpaleyeT conn $ run . selectTree =<< insertTree tree
+    tree' <- runOpaleyeT conn $ transactionReadOnly . selectTree =<< insertTree tree
 
     print tree
     print tree'
