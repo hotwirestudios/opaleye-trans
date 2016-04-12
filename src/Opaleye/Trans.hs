@@ -28,6 +28,9 @@ module Opaleye.Trans
     , insertReturningFirst'
     , insertManyReturning
 
+    , -- * Deletes
+      delete
+
     , unsafeQuery
 
     , -- * Opaleye
@@ -51,7 +54,8 @@ import           Opaleye.Constant                       as O
 import           Opaleye.Distinct                       as O
 import           Opaleye.Join                           as O
 import           Opaleye.Label                          as O
-import           Opaleye.Manipulation                   (runInsertMany,
+import           Opaleye.Manipulation                   (runDelete,
+                                                         runInsertMany,
                                                          runInsertManyReturning)
 import           Opaleye.Operators                      as O
 import           Opaleye.Order                          as O
@@ -152,6 +156,9 @@ insertManyReturning
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
 insertManyReturning table columns ret = unsafeWithConnectionIO (\c -> runInsertManyReturning c table columns ret)
+
+delete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
+delete table predicate = unsafeWithConnectionIO (\c -> runDelete c table predicate)
 
 unsafeQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
 unsafeQuery = unsafeWithConnectionIO
