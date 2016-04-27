@@ -2,11 +2,13 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Opaleye.Trans
     ( OpaleyeT (..)
     , runOpaleyeT
+    , runOpaleyeT'
 
     , -- * Transactions
       Transaction
@@ -31,7 +33,11 @@ module Opaleye.Trans
     , -- * Deletes
       runDelete
 
-    , unsafeRunQuery
+    , -- * Utils
+      setSchema
+
+    , -- * UNSAFE
+      unsafeRunQuery
 
     , -- * Opaleye
       module Export
@@ -42,9 +48,11 @@ import           Control.Monad.IO.Class                 (MonadIO, liftIO)
 import           Control.Monad.Reader                   (MonadReader,
                                                          ReaderT (..), ask)
 import           Control.Monad.Trans                    (MonadTrans (..))
+import           Data.Functor                           (void)
 import           Data.Int                               (Int64)
 import           Data.Maybe                             (listToMaybe)
 import           Data.Profunctor.Product.Default        (Default)
+import           Data.Text                              (Text)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
 import           Opaleye.Aggregate                      as Export
@@ -63,18 +71,24 @@ import           Opaleye.RunQuery                       (QueryRunner)
 import qualified Opaleye.RunQuery                       as OE
 import           Opaleye.Sql                            as Export
 import           Opaleye.Table                          as Export
+import           Opaleye.Types
 import           Opaleye.Values                         as Export
 
 -- | The 'Opaleye' monad transformer
-newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT PSQL.Connection m a }
-    deriving (Functor, Applicative, Monad, MonadTrans, MonadIO, MonadReader PSQL.Connection)
+newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT Env m a }
+    deriving (Functor, Applicative, Monad, MonadTrans, MonadIO, MonadReader Env)
 
 instance MonadBase b m => MonadBase b (OpaleyeT m) where
     liftBase = lift . liftBase
 
+type Env = (PSQL.Connection, Transaction ReadOnly ())
+
 -- | Given a 'Connection', run an 'OpaleyeT'
 runOpaleyeT :: PSQL.Connection -> OpaleyeT m a -> m a
-runOpaleyeT c = flip runReaderT c . unOpaleyeT
+runOpaleyeT c = runOpaleyeT' c $ pure ()
+
+runOpaleyeT' :: PSQL.Connection -> Transaction ReadOnly () -> OpaleyeT m a -> m a
+runOpaleyeT' c beforeAction = flip runReaderT (c, beforeAction) . unOpaleyeT
 -- TODO Handle exceptions
 
 newtype Transaction readWriteMode a = Transaction { unTransaction :: ReaderT PSQL.Connection IO a }
@@ -88,17 +102,20 @@ toReadWrite (Transaction t) = Transaction t
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
 runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
-runTransaction t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadWrite t
+runTransaction t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadWrite t
 
 -- | Run a postgresql read-only transaction in the 'OpaleyeT' monad
 runReadOnlyTransaction :: MonadIO m => Transaction ReadOnly a -> OpaleyeT m a
-runReadOnlyTransaction t = unsafeWithConnection $ \conn -> unsafeRunTransaction conn PSQL.ReadOnly t
+runReadOnlyTransaction t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadOnly t
 
-unsafeRunTransaction :: PSQL.Connection -> PSQL.ReadWriteMode -> Transaction readWriteMode a -> IO a
-unsafeRunTransaction conn readWriteMode (Transaction t) =
-    PSQL.withTransactionMode (PSQL.TransactionMode PSQL.defaultIsolationLevel readWriteMode) conn (runReaderT t conn)
+unsafeRunTransaction :: Env  -> PSQL.ReadWriteMode -> Transaction readWriteMode a -> IO a
+unsafeRunTransaction (conn, Transaction beforeAction) readWriteMode (Transaction t) =
+    PSQL.withTransactionMode
+        (PSQL.TransactionMode PSQL.defaultIsolationLevel readWriteMode)
+        conn
+        (runReaderT beforeAction conn *> runReaderT t conn)
 
-unsafeWithConnection :: MonadIO m => (PSQL.Connection -> IO a) -> OpaleyeT m a
+unsafeWithConnection :: MonadIO m => (Env -> IO a) -> OpaleyeT m a
 unsafeWithConnection f = liftIO . f =<< ask
 
 -- | Execute a 'Query'. See 'runQuery'.
@@ -167,3 +184,6 @@ unsafeRunQuery = unsafeWithConnectionIO
 -- in a transaction
 unsafeWithConnectionIO :: (PSQL.Connection -> IO a) -> Transaction readWriteMode a
 unsafeWithConnectionIO f = Transaction (ReaderT f)
+
+setSchema :: Schema -> Transaction ReadOnly ()
+setSchema (Schema schema) = unsafeWithConnectionIO $ \c -> void $ PSQL.execute c "SET LOCAL SCHEMA ?" (PSQL.Only schema)
