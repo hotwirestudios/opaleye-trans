@@ -4,7 +4,7 @@ module Opaleye.Types where
 
 import           Data.Text
 
-newtype Schema = Schema { unSchema :: Text }
+newtype Schema = Schema { unSchema :: Text } deriving (Eq, Show)
 
 publicSchema :: Schema
 publicSchema = Schema "public"

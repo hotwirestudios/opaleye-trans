@@ -34,7 +34,8 @@ module Opaleye.Trans
       runDelete
 
     , -- * Utils
-      setSchema
+      getSearchPath
+    , setLocalSearchPath
 
     , -- * UNSAFE
       unsafeRunQuery
@@ -50,9 +51,10 @@ import           Control.Monad.Reader                   (MonadReader,
 import           Control.Monad.Trans                    (MonadTrans (..))
 import           Data.Functor                           (void)
 import           Data.Int                               (Int64)
+import           Data.List                              (intercalate)
 import           Data.Maybe                             (listToMaybe)
 import           Data.Profunctor.Product.Default        (Default)
-import           Data.Text                              (Text)
+import           Data.Text                              (Text, splitOn, unpack)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
 import           Opaleye.Aggregate                      as Export
@@ -185,5 +187,12 @@ unsafeRunQuery = unsafeWithConnectionIO
 unsafeWithConnectionIO :: (PSQL.Connection -> IO a) -> Transaction readWriteMode a
 unsafeWithConnectionIO f = Transaction (ReaderT f)
 
-setSchema :: Schema -> Transaction ReadOnly ()
-setSchema (Schema schema) = unsafeWithConnectionIO $ \c -> void $ PSQL.execute c "SET LOCAL SCHEMA ?" (PSQL.Only schema)
+getSearchPath :: Transaction ReadWrite [Schema]
+getSearchPath = unsafeRunQuery $ \connection -> do
+    (searchPath:_) <- (PSQL.fromOnly <$>) <$> PSQL.query_ connection "SHOW search_path" :: IO [Text]
+    pure $ Schema <$> splitOn "," searchPath
+
+setLocalSearchPath :: [Schema] -> Transaction ReadOnly ()
+setLocalSearchPath schemas = do
+    let searchPath = intercalate "," (unpack . unSchema <$> schemas)
+    unsafeWithConnectionIO $ \c -> void $ PSQL.execute c "SET LOCAL search_path TO ?" (PSQL.Only searchPath)
