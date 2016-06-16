@@ -39,6 +39,7 @@ module Opaleye.Trans
 
     , -- * UNSAFE
       unsafeRunQuery
+    , unsafeRunReadOnlyQuery
 
     , -- * Opaleye
       module Export
@@ -180,6 +181,9 @@ runDelete table predicate = unsafeWithConnectionIO (\c -> OE.runDelete c table p
 
 unsafeRunQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
 unsafeRunQuery = unsafeWithConnectionIO
+
+unsafeRunReadOnlyQuery :: (PSQL.Connection -> IO a) -> Transaction ReadOnly a
+unsafeRunReadOnlyQuery = unsafeWithConnectionIO
 
 -- | With a 'Connection' in a 'Transaction'
 -- This isn't exposed so that users can't just drop down to IO
