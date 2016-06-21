@@ -26,9 +26,11 @@ module Opaleye.Trans
       runInsert
     , runInsertMany
     , runInsertReturning
-    , runInsertReturningFirst
-    , runInsertReturningFirst'
     , runInsertManyReturning
+
+    , -- * Updates
+      runUpdate
+    , runUpdateReturning
 
     , -- * Deletes
       runDelete
@@ -146,27 +148,6 @@ runInsertReturning
     -> Transaction ReadWrite [haskells]
 runInsertReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table [columns] ret)
 
--- | Insert a record into a 'Table' with a return value. Retrieve only the first result.
--- Similar to @listToMaybe <$> insertReturning@
-runInsertReturningFirst
-    :: Default QueryRunner returned haskells
-    => Table writerColumns readerColumns
-    -> writerColumns
-    -> (readerColumns -> returned)
-    -> Transaction ReadWrite (Maybe haskells)
-runInsertReturningFirst table columns ret = listToMaybe <$> runInsertReturning table columns ret
-
-runInsertReturningFirst'
-    :: Default QueryRunner returned haskells
-    => Table writerColumns readerColumns
-    -> writerColumns
-    -> (readerColumns -> returned)
-    -> Transaction ReadWrite haskells
-runInsertReturningFirst' table columns ret = head' <$> runInsertReturning table columns ret
-    where
-        head' [] = error "Return value expected in insertReturningFirst'"
-        head' (x:_) = x
-
 -- | Insert many records into a 'Table' with a return value for each record.
 runInsertManyReturning
     :: Default QueryRunner returned haskells
@@ -175,6 +156,18 @@ runInsertManyReturning
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
 runInsertManyReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table columns ret)
+
+runUpdate :: Table writerColumns readerColumns -> (readerColumns -> writerColumns) -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
+runUpdate table updates predicate = unsafeWithConnectionIO (\c -> OE.runUpdate c table updates predicate)
+
+runUpdateReturning
+    :: Default QueryRunner returned haskells
+    => Table writerColumns readerColumns
+    -> (readerColumns -> writerColumns)
+    -> (readerColumns -> Column PGBool)
+    -> (readerColumns -> returned)
+    -> Transaction ReadWrite [haskells]
+runUpdateReturning table updates predicate ret = unsafeWithConnectionIO (\c -> OE.runUpdateReturning c table updates predicate ret)
 
 runDelete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
 runDelete table predicate = unsafeWithConnectionIO (\c -> OE.runDelete c table predicate)
