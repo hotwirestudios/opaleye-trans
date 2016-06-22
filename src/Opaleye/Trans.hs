@@ -1,3 +1,4 @@
+{-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -96,11 +97,11 @@ runOpaleyeT' :: PSQL.Connection -> Transaction ReadOnly () -> OpaleyeT m a -> m 
 runOpaleyeT' c beforeAction = flip runReaderT (c, beforeAction) . unOpaleyeT
 -- TODO Handle exceptions
 
-newtype Transaction readWriteMode a = Transaction { unTransaction :: ReaderT PSQL.Connection IO a }
+newtype Transaction readWriteMode a = Transaction (ReaderT PSQL.Connection IO a)
     deriving (Functor, Applicative, Monad, MonadReader PSQL.Connection)
 
-newtype ReadOnly = ReadOnly ReadOnly
-newtype ReadWrite = ReadWrite ReadWrite
+data ReadOnly
+data ReadWrite
 
 toReadWrite :: Transaction readWriteMode a -> Transaction ReadWrite a
 toReadWrite (Transaction t) = Transaction t
