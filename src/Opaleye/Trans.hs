@@ -58,6 +58,7 @@ import           Data.Int                               (Int64)
 import           Data.List                              (intercalate)
 import           Data.Maybe                             (listToMaybe)
 import           Data.Profunctor.Product.Default        (Default)
+import           Data.String                            (fromString)
 import           Data.Text                              (Text, splitOn, unpack)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
@@ -192,5 +193,5 @@ getSearchPath = unsafeRunQuery $ \connection -> do
 
 setLocalSearchPath :: [Schema] -> Transaction ReadOnly ()
 setLocalSearchPath schemas = do
-    let searchPath = intercalate "," (unpack . unSchema <$> schemas)
-    unsafeWithConnectionIO $ \c -> void $ PSQL.execute c "SET LOCAL search_path TO ?" (PSQL.Only searchPath)
+    let searchPath = intercalate "," (("'"++) . (++"'") . unpack . unSchema <$> schemas)
+    unsafeWithConnectionIO $ \c -> void $ PSQL.execute_ c (fromString $ "SET LOCAL search_path TO " ++ searchPath)
