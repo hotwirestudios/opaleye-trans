@@ -39,6 +39,7 @@ module Opaleye.Trans
     , -- * Utils
       getSearchPath
     , setLocalSearchPath
+    , lockTable
 
     , -- * UNSAFE
       unsafeRunQuery
@@ -195,3 +196,8 @@ setLocalSearchPath :: [Schema] -> Transaction ReadOnly ()
 setLocalSearchPath schemas = do
     let searchPath = intercalate "," (("'"++) . (++"'") . unpack . unSchema <$> schemas)
     unsafeWithConnectionIO $ \c -> void $ PSQL.execute_ c (fromString $ "SET LOCAL search_path TO " ++ searchPath)
+
+lockTable :: LockMode -> [TableName] -> Transaction ReadOnly ()
+lockTable mode tables = do
+    let tables' = intercalate "," $ unpack . unTableName <$> tables
+    unsafeWithConnectionIO $ \c -> void $ PSQL.execute_ c (fromString $ "LOCK TABLE " ++ tables' ++ " IN " ++ show mode ++ " MODE")
