@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Opaleye.Trans
@@ -16,8 +17,11 @@ module Opaleye.Trans
     , ReadOnly
     , ReadWrite
     , toReadWrite
+    , toReadWriteExcept
     , runTransaction
+    , runTransactionExcept
     , runReadOnlyTransaction
+    , runReadOnlyTransactionExcept
 
     , -- * Queries
       runQuery
@@ -49,12 +53,17 @@ module Opaleye.Trans
       module Export
     ) where
 
+import qualified Control.Exception                      as E
+import           Control.Monad                          ((>=>))
 import           Control.Monad.Base                     (MonadBase, liftBase)
+import           Control.Monad.Except                   (ExceptT, mapExceptT,
+                                                         runExceptT)
 import           Control.Monad.IO.Class                 (MonadIO, liftIO)
 import           Control.Monad.Reader                   (MonadReader,
                                                          ReaderT (..), ask)
 import           Control.Monad.Trans                    (MonadTrans (..))
 import           Data.Functor                           (void)
+import           Data.Functor                           (($>))
 import           Data.Int                               (Int64)
 import           Data.List                              (intercalate)
 import           Data.Maybe                             (listToMaybe)
@@ -81,6 +90,7 @@ import           Opaleye.Sql                            as Export
 import           Opaleye.Table                          as Export
 import           Opaleye.Types
 import           Opaleye.Values                         as Export
+import           System.IO.Error                        (IOError)
 
 -- | The 'Opaleye' monad transformer
 newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT Env m a }
@@ -108,20 +118,49 @@ data ReadWrite
 toReadWrite :: Transaction readWriteMode a -> Transaction ReadWrite a
 toReadWrite (Transaction t) = Transaction t
 
+toReadWriteExcept :: ExceptT e (Transaction readWriteMode) a -> ExceptT e (Transaction ReadWrite) a
+toReadWriteExcept = mapExceptT (\(Transaction t) -> Transaction t)
+
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
 runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
-runTransaction t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadWrite t
+runTransaction = runTransactionExcept . lift >=> \(Right r) -> pure r
+
+-- | Run a postgresql read/write transaction in the 'OpaleyeT' monad and rollback when an error is thrown in ExceptT
+runTransactionExcept :: MonadIO m => ExceptT e (Transaction ReadWrite) a -> OpaleyeT m (Either e a)
+runTransactionExcept t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadWrite t
 
 -- | Run a postgresql read-only transaction in the 'OpaleyeT' monad
 runReadOnlyTransaction :: MonadIO m => Transaction ReadOnly a -> OpaleyeT m a
-runReadOnlyTransaction t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadOnly t
+runReadOnlyTransaction = runReadOnlyTransactionExcept . lift >=> \(Right r) -> pure r
 
-unsafeRunTransaction :: Env  -> PSQL.ReadWriteMode -> Transaction readWriteMode a -> IO a
-unsafeRunTransaction (conn, Transaction beforeAction) readWriteMode (Transaction t) =
-    PSQL.withTransactionMode
-        (PSQL.TransactionMode PSQL.defaultIsolationLevel readWriteMode)
-        conn
-        (runReaderT beforeAction conn *> runReaderT t conn)
+-- | Run a postgresql read-only transaction in the 'OpaleyeT' monad and rollback when an error is thrown in ExceptT
+runReadOnlyTransactionExcept :: MonadIO m => ExceptT e (Transaction ReadOnly) a -> OpaleyeT m (Either e a)
+runReadOnlyTransactionExcept t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadOnly t
+
+unsafeRunTransaction :: Env -> PSQL.ReadWriteMode -> ExceptT e (Transaction readWriteMode) a -> IO (Either e a)
+unsafeRunTransaction (conn, Transaction beforeAction) readWriteMode t =
+    withTransactionMode (PSQL.TransactionMode PSQL.defaultIsolationLevel readWriteMode) conn $ run (runExceptT t)
+    where
+        run :: Transaction readWriteMode (Either e a) -> IO (Either e a)
+        run (Transaction t) = do
+            runReaderT beforeAction conn
+            result <- runReaderT t conn
+            case result of
+                Right result -> PSQL.commit conn $> Right result
+                Left e -> PSQL.rollback conn $> Left e
+
+        -- copied from Database.PostgreSQL.Simple.Transaction
+        withTransactionMode :: PSQL.TransactionMode -> PSQL.Connection -> IO a -> IO a
+        withTransactionMode mode conn act =
+            E.mask $ \restore -> do
+                PSQL.beginMode mode conn
+                r <- restore act `E.onException` rollback_ conn
+                --commit conn -- this is the only change
+                pure r
+            where
+                -- | Rollback a transaction, ignoring any @IOErrors@
+                rollback_ :: PSQL.Connection -> IO ()
+                rollback_ conn = PSQL.rollback conn `E.catch` \(_ :: IOError) -> return ()
 
 unsafeWithConnection :: MonadIO m => (Env -> IO a) -> OpaleyeT m a
 unsafeWithConnection f = liftIO . f =<< ask
