@@ -16,38 +16,18 @@ module Opaleye.Trans
       Transaction
     , ReadOnly
     , ReadWrite
-    , toReadWrite
-    , toReadWriteExcept
     , runTransaction
     , runTransactionExcept
     , runReadOnlyTransaction
     , runReadOnlyTransactionExcept
 
-    , -- * Queries
-      runQuery
-    , runQueryFirst
-
-    , -- * Inserts
-      runInsert
-    , runInsertMany
-    , runInsertReturning
-    , runInsertManyReturning
-
-    , -- * Updates
-      runUpdate
-    , runUpdateReturning
-
-    , -- * Deletes
-      runDelete
-
-    , -- * Utils
-      getSearchPath
-    , setLocalSearchPath
-    , lockTable
-
-    , -- * UNSAFE
-      unsafeRunQuery
-    , unsafeRunReadOnlyQuery
+    , LockTable(..)
+    , GetSearchPath(..)
+    , SetLocalSearchPath(..)
+    , ReadDB(..)
+    , UnsafeReadDB(..)
+    , WriteDB(..)
+    , UnsafeWriteDB(..)
 
     , -- * Opaleye
       module Export
@@ -92,6 +72,66 @@ import           Opaleye.Types
 import           Opaleye.Values                         as Export
 import           System.IO.Error                        (IOError)
 
+class Monad m => LockTable m where
+    lockTable :: LockMode -> [TableName] -> m ()
+instance LockTable (Transaction ReadOnly) where
+    lockTable = lockTable'
+instance LockTable (Transaction ReadWrite) where
+    lockTable = lockTable'
+
+class Monad m => GetSearchPath m where
+    getSearchPath :: m [Schema]
+instance GetSearchPath (Transaction ReadOnly) where
+    getSearchPath = getSearchPath'
+instance GetSearchPath (Transaction ReadWrite) where
+    getSearchPath = getSearchPath'
+
+class Monad m => SetLocalSearchPath m where
+    setLocalSearchPath :: [Schema] -> m ()
+instance SetLocalSearchPath (Transaction ReadOnly) where
+    setLocalSearchPath = setLocalSearchPath'
+instance SetLocalSearchPath (Transaction ReadWrite) where
+    setLocalSearchPath = toReadWrite . setLocalSearchPath'
+
+class Monad m => ReadDB m where
+    runQuery :: Default QueryRunner readerColumns haskells => Query readerColumns -> m [haskells]
+    runQueryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> m (Maybe haskells)
+instance ReadDB (Transaction ReadOnly) where
+    runQuery = runQuery'
+    runQueryFirst = runQueryFirst'
+instance ReadDB (Transaction ReadWrite) where
+    runQuery = toReadWrite . runQuery'
+    runQueryFirst = toReadWrite . runQueryFirst'
+
+class Monad m => UnsafeReadDB m where
+    unsafeRunReadOnlyQuery :: (PSQL.Connection -> IO a) -> m a
+instance UnsafeReadDB (Transaction ReadOnly) where
+    unsafeRunReadOnlyQuery = unsafeWithConnectionIO
+instance UnsafeReadDB (Transaction ReadWrite) where
+    unsafeRunReadOnlyQuery = unsafeWithConnectionIO
+
+class Monad m => WriteDB m where
+    runInsert :: Table writerColumns readerColumns -> writerColumns -> m Int64
+    runInsertMany :: Table writerColumns readerColumns -> [writerColumns] -> m Int64
+    runInsertReturning :: Default QueryRunner returned haskells => Table writerColumns readerColumns -> writerColumns -> (readerColumns -> returned) -> m [haskells]
+    runInsertManyReturning :: Default QueryRunner returned haskells => Table writerColumns readerColumns -> [writerColumns] -> (readerColumns -> returned) -> m [haskells]
+    runUpdate :: Table writerColumns readerColumns -> (readerColumns -> writerColumns) -> (readerColumns -> Column PGBool) -> m Int64
+    runUpdateReturning :: Default QueryRunner returned haskells => Table writerColumns readerColumns -> (readerColumns -> writerColumns) -> (readerColumns -> Column PGBool) -> (readerColumns -> returned) -> m [haskells]
+    runDelete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> m Int64
+instance WriteDB (Transaction ReadWrite) where
+    runInsert = runInsert'
+    runInsertMany = runInsertMany'
+    runInsertReturning = runInsertReturning'
+    runInsertManyReturning = runInsertManyReturning'
+    runUpdate = runUpdate'
+    runUpdateReturning = runUpdateReturning'
+    runDelete = runDelete'
+
+class Monad m => UnsafeWriteDB m where
+    unsafeRunQuery :: (PSQL.Connection -> IO a) -> m a
+instance UnsafeWriteDB (Transaction ReadWrite) where
+    unsafeRunQuery = unsafeWithConnectionIO
+
 -- | The 'Opaleye' monad transformer
 newtype OpaleyeT m a = OpaleyeT { unOpaleyeT :: ReaderT Env m a }
     deriving (Functor, Applicative, Monad, MonadTrans, MonadIO, MonadReader Env)
@@ -117,9 +157,6 @@ data ReadWrite
 
 toReadWrite :: Transaction readWriteMode a -> Transaction ReadWrite a
 toReadWrite (Transaction t) = Transaction t
-
-toReadWriteExcept :: ExceptT e (Transaction readWriteMode) a -> ExceptT e (Transaction ReadWrite) a
-toReadWriteExcept = mapExceptT (\(Transaction t) -> Transaction t)
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
 runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
@@ -166,59 +203,53 @@ unsafeWithConnection :: MonadIO m => (Env -> IO a) -> OpaleyeT m a
 unsafeWithConnection f = liftIO . f =<< ask
 
 -- | Execute a 'Query'. See 'runQuery'.
-runQuery :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly [haskells]
-runQuery q = unsafeWithConnectionIO (`OE.runQuery` q)
+runQuery' :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly [haskells]
+runQuery' q = unsafeWithConnectionIO (`OE.runQuery` q)
 
 -- | Retrieve the first result from a 'Query'. Similar to @listToMaybe <$> runQuery@.
-runQueryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly (Maybe haskells)
-runQueryFirst q = listToMaybe <$> runQuery q
+runQueryFirst' :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly (Maybe haskells)
+runQueryFirst' q = listToMaybe <$> runQuery' q
 
 -- | Insert into a 'Table'. See 'runInsert'.
-runInsert :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
-runInsert table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table [columns])
+runInsert' :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
+runInsert' table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table [columns])
 
 -- | Insert many records into a 'Table'. See 'runInsertMany'.
-runInsertMany :: Table writerColumns readerColumns -> [writerColumns] -> Transaction ReadWrite Int64
-runInsertMany table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table columns)
+runInsertMany' :: Table writerColumns readerColumns -> [writerColumns] -> Transaction ReadWrite Int64
+runInsertMany' table columns = unsafeWithConnectionIO (\c -> OE.runInsertMany c table columns)
 
 -- | Insert a record into a 'Table' with a return value. See 'runInsertReturning'.
-runInsertReturning
+runInsertReturning'
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> writerColumns
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-runInsertReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table [columns] ret)
+runInsertReturning' table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table [columns] ret)
 
 -- | Insert many records into a 'Table' with a return value for each record.
-runInsertManyReturning
+runInsertManyReturning'
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> [writerColumns]
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-runInsertManyReturning table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table columns ret)
+runInsertManyReturning' table columns ret = unsafeWithConnectionIO (\c -> OE.runInsertManyReturning c table columns ret)
 
-runUpdate :: Table writerColumns readerColumns -> (readerColumns -> writerColumns) -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
-runUpdate table updates predicate = unsafeWithConnectionIO (\c -> OE.runUpdate c table updates predicate)
+runUpdate' :: Table writerColumns readerColumns -> (readerColumns -> writerColumns) -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
+runUpdate' table updates predicate = unsafeWithConnectionIO (\c -> OE.runUpdate c table updates predicate)
 
-runUpdateReturning
+runUpdateReturning'
     :: Default QueryRunner returned haskells
     => Table writerColumns readerColumns
     -> (readerColumns -> writerColumns)
     -> (readerColumns -> Column PGBool)
     -> (readerColumns -> returned)
     -> Transaction ReadWrite [haskells]
-runUpdateReturning table updates predicate ret = unsafeWithConnectionIO (\c -> OE.runUpdateReturning c table updates predicate ret)
+runUpdateReturning' table updates predicate ret = unsafeWithConnectionIO (\c -> OE.runUpdateReturning c table updates predicate ret)
 
-runDelete :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
-runDelete table predicate = unsafeWithConnectionIO (\c -> OE.runDelete c table predicate)
-
-unsafeRunQuery :: (PSQL.Connection -> IO a) -> Transaction ReadWrite a
-unsafeRunQuery = unsafeWithConnectionIO
-
-unsafeRunReadOnlyQuery :: (PSQL.Connection -> IO a) -> Transaction ReadOnly a
-unsafeRunReadOnlyQuery = unsafeWithConnectionIO
+runDelete' :: Table writerColumns readerColumns -> (readerColumns -> Column PGBool) -> Transaction ReadWrite Int64
+runDelete' table predicate = unsafeWithConnectionIO (\c -> OE.runDelete c table predicate)
 
 -- | With a 'Connection' in a 'Transaction'
 -- This isn't exposed so that users can't just drop down to IO
@@ -226,17 +257,17 @@ unsafeRunReadOnlyQuery = unsafeWithConnectionIO
 unsafeWithConnectionIO :: (PSQL.Connection -> IO a) -> Transaction readWriteMode a
 unsafeWithConnectionIO f = Transaction (ReaderT f)
 
-getSearchPath :: Transaction ReadWrite [Schema]
-getSearchPath = unsafeRunQuery $ \connection -> do
+getSearchPath' :: Transaction readWriteMode [Schema]
+getSearchPath' = unsafeWithConnectionIO $ \connection -> do
     (searchPath:_) <- (PSQL.fromOnly <$>) <$> PSQL.query_ connection "SHOW search_path" :: IO [Text]
     pure $ Schema <$> splitOn "," searchPath
 
-setLocalSearchPath :: [Schema] -> Transaction ReadOnly ()
-setLocalSearchPath schemas = do
+setLocalSearchPath' :: [Schema] -> Transaction readWriteMode ()
+setLocalSearchPath' schemas = do
     let searchPath = intercalate "," (("'"++) . (++"'") . unpack . unSchema <$> schemas)
     unsafeWithConnectionIO $ \c -> void $ PSQL.execute_ c (fromString $ "SET LOCAL search_path TO " ++ searchPath)
 
-lockTable :: LockMode -> [TableName] -> Transaction ReadOnly ()
-lockTable mode tables = do
+lockTable' :: LockMode -> [TableName] -> Transaction readWriteMode ()
+lockTable' mode tables = do
     let tables' = intercalate "," $ unpack . unTableName <$> tables
     unsafeWithConnectionIO $ \c -> void $ PSQL.execute_ c (fromString $ "LOCK TABLE " ++ tables' ++ " IN " ++ show mode ++ " MODE")
