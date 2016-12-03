@@ -11,7 +11,7 @@ newtype Schema = Schema { unSchema :: Text } deriving (Eq, Show, IsString)
 publicSchema :: Schema
 publicSchema = Schema "public"
 
-newtype TableName = TableName { unTableName :: Text } deriving (Eq, Show, IsString)
+newtype TableName = TableName { unTableName :: Text } deriving (Eq, Show, IsString, Monoid)
 
 data LockMode
     = AccessShare
