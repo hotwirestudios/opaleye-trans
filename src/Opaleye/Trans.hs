@@ -52,6 +52,12 @@ import           Data.String                            (fromString)
 import           Data.Text                              (Text, splitOn, unpack)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
+import qualified Opaleye.Manipulation                   as OE
+import           Opaleye.RunQuery                       (QueryRunner)
+import qualified Opaleye.RunQuery                       as OE
+import           Opaleye.Types
+import           System.IO.Error                        (IOError)
+
 import           Opaleye.Aggregate                      as Export
 import           Opaleye.Binary                         as Export
 import           Opaleye.Column                         as Export
@@ -59,18 +65,13 @@ import           Opaleye.Constant                       as Export
 import           Opaleye.Distinct                       as Export
 import           Opaleye.Join                           as Export
 import           Opaleye.Label                          as Export
-import qualified Opaleye.Manipulation                   as OE
 import           Opaleye.Operators                      as Export
 import           Opaleye.Order                          as Export
 import           Opaleye.PGTypes                        as Export
 import           Opaleye.QueryArr                       as Export
-import           Opaleye.RunQuery                       (QueryRunner)
-import qualified Opaleye.RunQuery                       as OE
 import           Opaleye.Sql                            as Export
 import           Opaleye.Table                          as Export
-import           Opaleye.Types
 import           Opaleye.Values                         as Export
-import           System.IO.Error                        (IOError)
 
 class Monad m => LockTable m where
     lockTable :: LockMode -> [TableName] -> m ()
@@ -164,7 +165,7 @@ runTransaction = runTransactionExcept . lift >=> \(Right r) -> pure r
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad and rollback when an error is thrown in ExceptT
 runTransactionExcept :: MonadIO m => ExceptT e (Transaction ReadWrite) a -> OpaleyeT m (Either e a)
-runTransactionExcept t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadWrite t
+runTransactionExcept = unsafeRunTransactionExcept PSQL.ReadWrite
 
 -- | Run a postgresql read-only transaction in the 'OpaleyeT' monad
 runReadOnlyTransaction :: MonadIO m => Transaction ReadOnly a -> OpaleyeT m a
@@ -172,10 +173,13 @@ runReadOnlyTransaction = runReadOnlyTransactionExcept . lift >=> \(Right r) -> p
 
 -- | Run a postgresql read-only transaction in the 'OpaleyeT' monad and rollback when an error is thrown in ExceptT
 runReadOnlyTransactionExcept :: MonadIO m => ExceptT e (Transaction ReadOnly) a -> OpaleyeT m (Either e a)
-runReadOnlyTransactionExcept t = unsafeWithConnection $ \env -> unsafeRunTransaction env PSQL.ReadOnly t
+runReadOnlyTransactionExcept = unsafeRunTransactionExcept PSQL.ReadOnly
 
-unsafeRunTransaction :: Env -> PSQL.ReadWriteMode -> ExceptT e (Transaction readWriteMode) a -> IO (Either e a)
-unsafeRunTransaction (conn, Transaction beforeAction) readWriteMode t =
+unsafeRunTransactionExcept :: MonadIO m => PSQL.ReadWriteMode -> ExceptT e (Transaction readWriteMode) a -> OpaleyeT m (Either e a)
+unsafeRunTransactionExcept readWriteMode t = unsafeWithConnection $ \env -> unsafeRunTransactionExcept' env readWriteMode t
+
+unsafeRunTransactionExcept' :: Env -> PSQL.ReadWriteMode -> ExceptT e (Transaction readWriteMode) a -> IO (Either e a)
+unsafeRunTransactionExcept' (conn, Transaction beforeAction) readWriteMode t =
     withTransactionMode (PSQL.TransactionMode PSQL.defaultIsolationLevel readWriteMode) conn $ run (runExceptT t)
     where
         run :: Transaction readWriteMode (Either e a) -> IO (Either e a)
