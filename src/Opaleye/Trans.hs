@@ -16,6 +16,9 @@ module Opaleye.Trans
       Transaction
     , ReadOnly
     , ReadWrite
+
+    , QueryArrBase(..)
+
     , runTransaction
     , runTransactionExcept
     , runReadOnlyTransaction
@@ -24,7 +27,7 @@ module Opaleye.Trans
     , LockTable(..)
     , GetSearchPath(..)
     , SetLocalSearchPath(..)
-    , ReadDB(..)
+    , ReadDBBase(..)
     , UnsafeReadDB(..)
     , WriteDB(..)
     , UnsafeWriteDB(..)
@@ -33,6 +36,7 @@ module Opaleye.Trans
       module Export
     ) where
 
+import           Control.Arrow                          (Arrow)
 import qualified Control.Exception                      as E
 import           Control.Monad                          ((>=>))
 import           Control.Monad.Base                     (MonadBase, liftBase)
@@ -47,31 +51,37 @@ import           Data.Functor                           (($>))
 import           Data.Int                               (Int64)
 import           Data.List                              (intercalate)
 import           Data.Maybe                             (listToMaybe)
+import           Data.Profunctor.Product                (ProductProfunctor)
 import           Data.Profunctor.Product.Default        (Default)
 import           Data.String                            (fromString)
 import           Data.Text                              (Text, splitOn, unpack)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
-import qualified Opaleye.Manipulation                   as OE
+import qualified Opaleye                                as OE
+import           Opaleye.Internal.Join                  (NullMaker)
+import           Opaleye.Internal.Unpackspec            (Unpackspec)
 import           Opaleye.RunQuery                       (QueryRunner)
-import qualified Opaleye.RunQuery                       as OE
 import           Opaleye.Types
 import           System.IO.Error                        (IOError)
 
-import           Opaleye.Aggregate                      as Export
-import           Opaleye.Binary                         as Export
-import           Opaleye.Column                         as Export
-import           Opaleye.Constant                       as Export
-import           Opaleye.Distinct                       as Export
-import           Opaleye.Join                           as Export
-import           Opaleye.Label                          as Export
-import           Opaleye.Operators                      as Export
-import           Opaleye.Order                          as Export
-import           Opaleye.PGTypes                        as Export
-import           Opaleye.QueryArr                       as Export
-import           Opaleye.Sql                            as Export
-import           Opaleye.Table                          as Export
-import           Opaleye.Values                         as Export
+import           Opaleye                                as Export hiding
+                                                                   (aggregate,
+                                                                   aggregateOrdered,
+                                                                   countRows,
+                                                                   keepWhen,
+                                                                   leftJoin,
+                                                                   limit,
+                                                                   offset,
+                                                                   orderBy,
+                                                                   restrict,
+                                                                   runDelete,
+                                                                   runInsert,
+                                                                   runInsertMany,
+                                                                   runInsertManyReturning,
+                                                                   runInsertReturning,
+                                                                   runQuery,
+                                                                   runUpdate,
+                                                                   runUpdateReturning)
 
 class Monad m => LockTable m where
     lockTable :: LockMode -> [TableName] -> m ()
@@ -94,13 +104,13 @@ instance SetLocalSearchPath (Transaction ReadOnly) where
 instance SetLocalSearchPath (Transaction ReadWrite) where
     setLocalSearchPath = toReadWrite . setLocalSearchPath'
 
-class Monad m => ReadDB m where
-    runQuery :: Default QueryRunner readerColumns haskells => Query readerColumns -> m [haskells]
-    runQueryFirst :: Default QueryRunner readerColumns haskells => Query readerColumns -> m (Maybe haskells)
-instance ReadDB (Transaction ReadOnly) where
+class Monad m => ReadDBBase query m where
+    runQuery :: Default QueryRunner readerColumns haskells => query () readerColumns -> m [haskells]
+    runQueryFirst :: Default QueryRunner readerColumns haskells => query () readerColumns -> m (Maybe haskells)
+instance ReadDBBase QueryArr (Transaction ReadOnly) where
     runQuery = runQuery'
     runQueryFirst = runQueryFirst'
-instance ReadDB (Transaction ReadWrite) where
+instance ReadDBBase QueryArr (Transaction ReadWrite) where
     runQuery = toReadWrite . runQuery'
     runQueryFirst = toReadWrite . runQueryFirst'
 
@@ -158,6 +168,34 @@ data ReadWrite
 
 toReadWrite :: Transaction readWriteMode a -> Transaction ReadWrite a
 toReadWrite (Transaction t) = Transaction t
+
+class (Arrow query, ProductProfunctor query) => QueryArrBase query where
+    restrict :: query (Column PGBool) ()
+    keepWhen :: (a -> Column PGBool) -> query a a
+
+    orderBy :: Order a -> query () a -> query () a
+    limit :: Int -> query () a -> query () a
+    offset :: Int -> query () a -> query () a
+
+    leftJoin :: (Default Unpackspec columnsA columnsA, Default Unpackspec columnsB columnsB, Default NullMaker columnsB nullableColumnsB) => query () columnsA -> query () columnsB -> ((columnsA, columnsB) -> Column PGBool) -> query () (columnsA, nullableColumnsB)
+
+    countRows :: query () a -> query () (Column PGInt8)
+    aggregate :: Aggregator a b -> query () a -> query () b
+    aggregateOrdered :: Order a -> Aggregator a b -> query () a -> query () b
+
+instance QueryArrBase OE.QueryArr where
+    restrict = OE.restrict
+    keepWhen = OE.keepWhen
+
+    orderBy = OE.orderBy
+    limit = OE.limit
+    offset = OE.offset
+
+    leftJoin = OE.leftJoin
+
+    countRows = OE.countRows
+    aggregate = OE.aggregate
+    aggregateOrdered = OE.aggregateOrdered
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
 runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
