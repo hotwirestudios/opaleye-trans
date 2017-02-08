@@ -42,12 +42,12 @@ import           Control.Monad                          ((>=>))
 import           Control.Monad.Base                     (MonadBase, liftBase)
 import           Control.Monad.Except                   (ExceptT, mapExceptT,
                                                          runExceptT)
+import           Control.Monad.Fail                     (MonadFail (fail))
 import           Control.Monad.IO.Class                 (MonadIO, liftIO)
 import           Control.Monad.Reader                   (MonadReader,
                                                          ReaderT (..), ask)
 import           Control.Monad.Trans                    (MonadTrans (..))
-import           Data.Functor                           (void)
-import           Data.Functor                           (($>))
+import           Data.Functor                           (void, ($>))
 import           Data.Int                               (Int64)
 import           Data.List                              (intercalate)
 import           Data.Maybe                             (listToMaybe)
@@ -162,6 +162,8 @@ runOpaleyeT' c beforeAction = flip runReaderT (c, beforeAction) . unOpaleyeT
 
 newtype Transaction readWriteMode a = Transaction (ReaderT PSQL.Connection IO a)
     deriving (Functor, Applicative, Monad, MonadReader PSQL.Connection)
+instance MonadFail (Transaction readWriteMode) where
+    fail = error
 
 data ReadOnly
 data ReadWrite
