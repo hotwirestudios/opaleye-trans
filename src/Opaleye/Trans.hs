@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -42,7 +43,9 @@ import           Control.Monad                          ((>=>))
 import           Control.Monad.Base                     (MonadBase, liftBase)
 import           Control.Monad.Except                   (ExceptT, mapExceptT,
                                                          runExceptT)
+#if MIN_VERSION_base(4, 9, 0)
 import           Control.Monad.Fail                     (MonadFail (fail))
+#endif
 import           Control.Monad.IO.Class                 (MonadIO, liftIO)
 import           Control.Monad.Reader                   (MonadReader,
                                                          ReaderT (..), ask)
@@ -162,8 +165,10 @@ runOpaleyeT' c beforeAction = flip runReaderT (c, beforeAction) . unOpaleyeT
 
 newtype Transaction readWriteMode a = Transaction (ReaderT PSQL.Connection IO a)
     deriving (Functor, Applicative, Monad, MonadReader PSQL.Connection)
+#if MIN_VERSION_base(4, 9, 0)
 instance MonadFail (Transaction readWriteMode) where
     fail = error
+#endif
 
 data ReadOnly
 data ReadWrite
