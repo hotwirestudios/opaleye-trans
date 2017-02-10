@@ -61,6 +61,7 @@ import           Data.Text                              (Text, splitOn, unpack)
 import qualified Database.PostgreSQL.Simple             as PSQL
 import qualified Database.PostgreSQL.Simple.Transaction as PSQL
 import qualified Opaleye                                as OE
+import           Opaleye.Internal.Binary                (Binaryspec)
 import           Opaleye.Internal.Join                  (NullMaker)
 import           Opaleye.Internal.Unpackspec            (Unpackspec)
 import           Opaleye.RunQuery                       (QueryRunner)
@@ -71,6 +72,10 @@ import           Opaleye                                as Export hiding
                                                                    (aggregate,
                                                                    aggregateOrdered,
                                                                    countRows,
+                                                                   except,
+                                                                   exceptAll,
+                                                                   intersect,
+                                                                   intersectAll,
                                                                    keepWhen,
                                                                    leftJoin,
                                                                    limit,
@@ -84,7 +89,9 @@ import           Opaleye                                as Export hiding
                                                                    runInsertReturning,
                                                                    runQuery,
                                                                    runUpdate,
-                                                                   runUpdateReturning)
+                                                                   runUpdateReturning,
+                                                                   union,
+                                                                   unionAll)
 
 class Monad m => LockTable m where
     lockTable :: LockMode -> [TableName] -> m ()
@@ -190,6 +197,15 @@ class (Arrow query, ProductProfunctor query) => QueryArrBase query where
     aggregate :: Aggregator a b -> query () a -> query () b
     aggregateOrdered :: Order a -> Aggregator a b -> query () a -> query () b
 
+    unionAll :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+    union :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+
+    intersectAll :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+    intersect :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+
+    exceptAll :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+    except :: Default Binaryspec columns columns => query () columns -> query () columns -> query () columns
+
 instance QueryArrBase OE.QueryArr where
     restrict = OE.restrict
     keepWhen = OE.keepWhen
@@ -203,6 +219,15 @@ instance QueryArrBase OE.QueryArr where
     countRows = OE.countRows
     aggregate = OE.aggregate
     aggregateOrdered = OE.aggregateOrdered
+
+    unionAll = OE.unionAll
+    union = OE.union
+
+    intersectAll = OE.intersectAll
+    intersect = OE.intersect
+
+    exceptAll = OE.exceptAll
+    except = OE.except
 
 -- | Run a postgresql read/write transaction in the 'OpaleyeT' monad
 runTransaction :: MonadIO m => Transaction ReadWrite a -> OpaleyeT m a
