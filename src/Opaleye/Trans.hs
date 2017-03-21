@@ -258,7 +258,7 @@ unsafeRunTransactionExcept' (conn, Transaction beforeAction) readWriteMode t =
             result <- runReaderT t conn
             case result of
                 Right result -> PSQL.commit conn $> Right result
-                Left e -> PSQL.rollback conn $> Left e
+                Left e       -> PSQL.rollback conn $> Left e
 
         -- copied from Database.PostgreSQL.Simple.Transaction
         withTransactionMode :: PSQL.TransactionMode -> PSQL.Connection -> IO a -> IO a
@@ -282,7 +282,7 @@ runQuery' q = unsafeWithConnectionIO (`OE.runQuery` q)
 
 -- | Retrieve the first result from a 'Query'. Similar to @listToMaybe <$> runQuery@.
 runQueryFirst' :: Default QueryRunner readerColumns haskells => Query readerColumns -> Transaction ReadOnly (Maybe haskells)
-runQueryFirst' q = listToMaybe <$> runQuery' q
+runQueryFirst' q = listToMaybe <$> runQuery' (limit 1 q)
 
 -- | Insert into a 'Table'. See 'runInsert'.
 runInsert' :: Table writerColumns readerColumns -> writerColumns -> Transaction ReadWrite Int64
