@@ -27,12 +27,12 @@ library
   -- other-modules:
   default-language:    Haskell2010
   build-depends:
-    base                >=4.8 && <4.12,
+    base                >=4.8 && <4.13,
     mtl                 >=2.2 && <2.3,
     transformers        >=0.3 && <0.6,
     transformers-base   >=0.4 && <0.5,
     opaleye             >=0.4 && <0.7,
-    postgresql-simple   >=0.4 && <0.6,
+    postgresql-simple   >=0.4 && <0.7,
     product-profunctors >=0.6 && <0.11,
     text                >=1.2 && <1.3
 
@@ -43,10 +43,10 @@ executable opaleye-rosetree
   main-is:             RoseTree.hs
   default-language:    Haskell2010
   build-depends:
-    base                >=4.8 && <4.12,
+    base                >=4.8 && <4.13,
     transformers        >=0.3 && <0.6,
     opaleye             >=0.4 && <0.7,
-    postgresql-simple   >=0.4 && <0.6,
+    postgresql-simple   >=0.4 && <0.7,
     product-profunctors >=0.6 && <0.11,
     opaleye-trans
 
@@ -57,9 +57,9 @@ executable opaleye-rosetree2
   main-is:             RoseTree.hs
   default-language:    Haskell2010
   build-depends:
-    base                >=4.8 && <4.12,
+    base                >=4.8 && <4.13,
     transformers        >=0.3 && <0.6,
     opaleye             >=0.4 && <0.7,
-    postgresql-simple   >=0.4 && <0.6,
+    postgresql-simple   >=0.4 && <0.7,
     product-profunctors >=0.6 && <0.11,
     opaleye-trans
